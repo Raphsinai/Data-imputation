@@ -96,7 +96,7 @@ def save_to_sheet(array : np.ndarray, sheet, names : list = None, sample_start :
     return sheet
     
 
-def test_all(array : np.ndarray, names : list = None, sample_start : int = 1) -> list:
+def test_all(array : np.ndarray, names : list = None, sample_start : int = 1, filename : str = 'Test') -> list:
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = 'Original'
@@ -121,7 +121,7 @@ def test_all(array : np.ndarray, names : list = None, sample_start : int = 1) ->
     sheet = workbook['Moving Window (Interpolation) Imputation']
     imputed = impyute.moving_window(array)
     sheet = save_to_sheet(imputed, sheet, names, sample_start)
-    workbook.save('Test.xlsx')
+    workbook.save(f'{filename}.xlsx')
 
     
     
