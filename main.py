@@ -2,6 +2,7 @@ import impyute
 import numpy as np
 import random
 import openpyxl
+from openpyxl.styles.fills import PatternFill
 
 
 def read_csv(filename : str) -> np.array:
@@ -82,7 +83,7 @@ def get_small_nan(array : np.ndarray, min_n : int = 5, square : bool = True, use
             indexes.append(index)
     return len(indexes), [rows_cols[index] for index in indexes], [segments[index] for index in indexes]
 
-def save_to_sheet(array : np.ndarray, sheet, names : list = None, sample_start : int = 1):
+def save_to_sheet(array : np.ndarray, sheet, names : list = None, sample_start : int = 1, highlight : list = []):
     if names != None:
         names = ['Sample #']+names
         sheet.append(names)
@@ -93,34 +94,41 @@ def save_to_sheet(array : np.ndarray, sheet, names : list = None, sample_start :
                 l_row[i] = 'NA'
         row = [f'Sample #{n+sample_start}']+l_row
         sheet.append(row)
+    for cell in highlight:
+        sheet[chr(65+cell[0]+1)+str(cell[1]+2)].fill = PatternFill(start_color='ebe834', end_color='ebe834', fill_type='solid')
     return sheet
     
 
 def test_all(array : np.ndarray, names : list = None, sample_start : int = 1, filename : str = 'Test') -> list:
+    na_indicies = []
+    for r_i, row in enumerate(np.isnan(array)):
+        for c_i, value in enumerate(row):
+            if value:
+                na_indicies.append((c_i, r_i))
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = 'Original'
-    sheet = save_to_sheet(array, sheet, names, sample_start)
+    sheet = save_to_sheet(array, sheet, names, sample_start, na_indicies)
     workbook.create_sheet(title='MICE Imputation')
     sheet = workbook['MICE Imputation']
     imputed = impyute.mice(array)
-    sheet = save_to_sheet(imputed, sheet, names, sample_start)
+    sheet = save_to_sheet(imputed, sheet, names, sample_start, na_indicies)
     workbook.create_sheet(title='k=3 Nearest Neighbours Imputation')
     sheet = workbook['k=3 Nearest Neighbours Imputation']
     imputed = impyute.fast_knn(array, k=3)
-    sheet = save_to_sheet(imputed, sheet, names, sample_start)
+    sheet = save_to_sheet(imputed, sheet, names, sample_start, na_indicies)
     workbook.create_sheet(title='Expectation Maximisation Imputation')
     sheet = workbook['Expectation Maximisation Imputation']
     imputed = impyute.em(array)
-    sheet = save_to_sheet(imputed, sheet, names, sample_start)
+    sheet = save_to_sheet(imputed, sheet, names, sample_start, na_indicies)
     workbook.create_sheet(title='Moving Window (Interpolation) Imputation Transposed')
     sheet = workbook['Moving Window (Interpolation) Imputation Transposed']
     imputed = impyute.moving_window(array.transpose())
-    sheet = save_to_sheet(imputed.transpose(), sheet, names, sample_start)
+    sheet = save_to_sheet(imputed.transpose(), sheet, names, sample_start, na_indicies)
     workbook.create_sheet(title='Moving Window (Interpolation) Imputation')
     sheet = workbook['Moving Window (Interpolation) Imputation']
     imputed = impyute.moving_window(array)
-    sheet = save_to_sheet(imputed, sheet, names, sample_start)
+    sheet = save_to_sheet(imputed, sheet, names, sample_start, na_indicies)
     workbook.save(f'{filename}.xlsx')
 
     
@@ -131,5 +139,7 @@ if __name__ == '__main__':
     np.set_printoptions(linewidth=1000)
     names, array = read_csv('sample_data_raf.csv')
     smallest_nan = get_small_nan(array, min_n=12)
+
+    print(smallest_nan[2][0])
     
-    test_all(smallest_nan[2][0], names[smallest_nan[1][0][0][1]:smallest_nan[1][0][1][1]], smallest_nan[1][0][0][0])
+    #test_all(smallest_nan[2][0], names[smallest_nan[1][0][0][1]:smallest_nan[1][0][1][1]], smallest_nan[1][0][0][0])
