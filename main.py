@@ -3,6 +3,10 @@ import numpy as np
 import random
 import openpyxl
 from openpyxl.styles.fills import PatternFill
+import math
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer, KNNImputer
+import json
 
 
 def read_csv(filename : str) -> np.array:
@@ -98,7 +102,7 @@ def get_small_nan(array : np.ndarray, min_n : int = 5, square : bool = True, use
             indexes.append(index)
     return len(indexes), [rows_cols[index] for index in indexes], [segments[index] for index in indexes]
 
-def save_to_sheet(array : np.ndarray, sheet, names : list = None, samples : list = [], highlight : list = []):
+def save_to_sheet(array : np.ndarray, sheet, diffs : dict, names : list = None, samples : list = [], highlight : list = []):
     """
     Save numpy array to an excel sheet with specified highlighted nan coordinates
     """
@@ -116,6 +120,10 @@ def save_to_sheet(array : np.ndarray, sheet, names : list = None, samples : list
         sheet.append(row)
     for cell in highlight:
         sheet[chr(65+cell[0]+1)+str(cell[1]+2)].fill = PatternFill(start_color='ebe834', end_color='ebe834', fill_type='solid')
+    sheet.append([])
+    sheet.append([f'Percentage diff {chr(65+highlight[0][0]+1)+str(highlight[0][1]+2)}', diffs['Percentage diffs'][0], '', 'Sum of percentage diffs', diffs["Percentage diffs sum"], 'Average percentage diff', diffs["Average percentage diff"], 'RMSE', diffs['RMSE']])
+    for i, cell in enumerate(highlight[1:]):
+        sheet.append([f'Percentage diff {chr(65+cell[0]+1)+str(cell[1]+2)}', diffs["Percentage diffs"][i+1]])
     return sheet
     
 
@@ -126,55 +134,99 @@ def randints(max : int, n_rand : int, seed : int = 25) -> list:
         nums[i] = round(random.random()*max)
     return nums
 
+def get_vals(array : np.ndarray, indicies : list) -> list:
+    return [array[i[1], i[0]] for i in indicies]
 
-def test_all(array : np.ndarray, n_nan : int = 1, names : list = None, samples : list = [], filename : str = 'Test', seed : int = 25) -> list:
-    """
-    Test all relevant imputation methods and save them to a spreadsheet
-    """
-    print(array.shape)
+def get_diffs(og_vals : list, imp: np.ndarray, indicides: list):
+    n_nan = len(indicides)
+    new_vals = get_vals(imp, indicides)
+    perc_diff = []
+    sum_diff = 0
+    av_diff = 0
+    for i in range(n_nan):
+        diff = 0
+        if og_vals[i] != 0:
+            diff = abs(((new_vals[i]-og_vals[i])/og_vals[i])*100)
+        perc_diff.append(diff)
+        sum_diff += diff
+    av_diff = sum_diff/n_nan
+    return {'Percentage diffs': perc_diff, 'Percentage diffs sum': sum_diff, 'Average percentage diff': av_diff}
+
+def rmse(og_vals : list, imp: np.ndarray, indicides: list):
+    n_nan = len(indicides)
+    new_vals = get_vals(imp, indicides)
+    sse = 0
+    for i, val in enumerate(new_vals):
+        sse += (val-og_vals[i])**2
+    mse = sse/n_nan
+    return math.sqrt(mse)
+
+def test_all_diff(array : np.ndarray, imputation_funcs : dict, n_nan : int = 1, names : list = None, samples : list = [], filename : str = 'Test', seed : int = 25):
     height, width = array.shape
     col_indicies = randints(width, n_nan, seed)
     row_indicies = randints(height, n_nan, seed+n_nan)
     na_indicies = [(col_indicies[i], row_indicies[i]) for i in range(n_nan)]
+    og_vals = get_vals(array, na_indicies)
+    for index in na_indicies:
+        array[index[1], index[0]] = np.nan
+
+    res = {}
+
+    for method, func in imputation_funcs.items():
+        imputed = func(array)
+        diffs = get_diffs(og_vals,imputed, na_indicies)
+        diffs['RMSE'] = rmse(og_vals, imputed, na_indicies)
+        res[method] = diffs
+    
+    return res
+
+def test_all_excel(array : np.ndarray, imputation_funcs : dict, n_nan : int = 1, names : list = None, samples : list = [], filename : str = 'Test', seed : int = 25) -> list:
+    """
+    Test all relevant imputation methods and save them to a spreadsheet
+    """
+    height, width = array.shape
+    col_indicies = randints(width, n_nan, seed)
+    row_indicies = randints(height, n_nan, seed+n_nan)
+    na_indicies = [(col_indicies[i], row_indicies[i]) for i in range(n_nan)]
+    og_vals = get_vals(array, na_indicies)
     # Create workbook to store data
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = 'Original'
-    sheet = save_to_sheet(array, sheet, names, samples, na_indicies)
+    sheet = save_to_sheet(array, sheet, ([0 for _ in range(n_nan)],0,0,0), names, samples, na_indicies)
     for index in na_indicies:
         array[index[1], index[0]] = np.nan
-    workbook.create_sheet(title='MICE Imputation')
-    sheet = workbook['MICE Imputation']
-    imputed = impyute.mice(array)
-    sheet = save_to_sheet(imputed, sheet, names, samples, na_indicies)
-    workbook.create_sheet(title='k=3 Nearest Neighbours Imputation')
-    sheet = workbook['k=3 Nearest Neighbours Imputation']
-    imputed = impyute.fast_knn(array, k=3)
-    sheet = save_to_sheet(imputed, sheet, names, samples, na_indicies)
-    workbook.create_sheet(title='Expectation Maximisation Imputation')
-    sheet = workbook['Expectation Maximisation Imputation']
-    imputed = impyute.em(array)
-    sheet = save_to_sheet(imputed, sheet, names, samples, na_indicies)
-    workbook.create_sheet(title='Moving Window (Interpolation) Imputation Transposed')
-    sheet = workbook['Moving Window (Interpolation) Imputation Transposed']
-    imputed = impyute.moving_window(array.transpose())
-    sheet = save_to_sheet(imputed.transpose(), sheet, names, samples, na_indicies)
-    workbook.create_sheet(title='Moving Window (Interpolation) Imputation')
-    sheet = workbook['Moving Window (Interpolation) Imputation']
-    imputed = impyute.moving_window(array)
-    sheet = save_to_sheet(imputed, sheet, names, samples, na_indicies)
+
+    for method, func in imputation_funcs.items():
+        workbook.create_sheet(title=method)
+        sheet = workbook[method]
+        imputed = func(array)
+        diffs = get_diffs(og_vals,imputed, na_indicies)
+        diffs['RMSE'] = rmse(og_vals, imputed, na_indicies)
+        sheet = save_to_sheet(imputed, sheet, diffs, names, samples, na_indicies)
+
     workbook.save(f'{filename}.xlsx')
 
-    
-    
-    
 
 if __name__ == '__main__':
+    from pprint import pformat
     np.set_printoptions(linewidth=1000)
     names, array = read_csv('sample_data_raf.csv')
     # smallest_nan = get_small_nan(array, min_n=12)
-    no_nan = get_non_nan(array, 10)
 
-    print(no_nan[0], no_nan[1])
+    it_imputer = IterativeImputer(max_iter=25, random_state=0)
+    knn_imputer = KNNImputer()
+
+    final = {}
+
+    for i in range(10,101,10):
+        no_nan = get_non_nan(array, 0, i)
+        if no_nan[2].shape[0]*no_nan[2].shape[1] == 0:
+            break
+        res = test_all_diff(no_nan[2], {'MICE impyute': impyute.mice, 'Iterative scilearn max=25 random=0': it_imputer.fit_transform, 'KNN scilearn': knn_imputer.fit_transform}, 2, [names[i] for i in no_nan[1]], no_nan[0],seed=random.randint(0,100))
+        final[f'{i} columns'] = res
     
-    test_all(no_nan[2], 2, [names[i] for i in no_nan[1]], no_nan[0],seed=40)
+    with open('result.json', 'w') as f:
+        f.write(json.dumps(final))
+        f.close()
+        
