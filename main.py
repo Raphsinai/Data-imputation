@@ -7,6 +7,7 @@ import math
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer, KNNImputer
 import json
+from matplotlib import pyplot as plt
 
 
 def read_csv(filename : str) -> np.array:
@@ -131,7 +132,7 @@ def randints(max : int, n_rand : int, seed : int = 25) -> list:
     nums = [None for _ in range(n_rand)]
     for i in range(n_rand):
         random.seed(seed+i)
-        nums[i] = round(random.random()*max)
+        nums[i] = round(random.random()*max)-1
     return nums
 
 def get_vals(array : np.ndarray, indicies : list) -> list:
@@ -214,19 +215,82 @@ if __name__ == '__main__':
     names, array = read_csv('sample_data_raf.csv')
     # smallest_nan = get_small_nan(array, min_n=12)
 
-    it_imputer = IterativeImputer(max_iter=25, random_state=0)
-    knn_imputer = KNNImputer()
+    it_imputer_25_0 = IterativeImputer(max_iter=25, random_state=0, tol=0.001)
+    it_imputer_25_1 = IterativeImputer(max_iter=25, random_state=1)
+    it_imputer_100_1 = IterativeImputer(max_iter=100, random_state=1)
+    it_imputer_100_0 = IterativeImputer(max_iter=100, random_state=0)
+    knn_imputer_2 = KNNImputer(n_neighbors=2)
+    knn_imputer_4 = KNNImputer(n_neighbors=4)
+    knn_imputer_6 = KNNImputer(n_neighbors=6)
+    knn_imputer_8 = KNNImputer(n_neighbors=8)
+    knn_imputer_10 = KNNImputer(n_neighbors=10)
+    knn_imputer_12 = KNNImputer(n_neighbors=12)
+    knn_imputer_14 = KNNImputer(n_neighbors=14)
 
-    final = {}
+    final_all = {}
+    final_rmse = {}
+    total_rmse = {}
+    rmse_prog = {}
 
-    for i in range(10,101,10):
+    start = 2
+    step = 2
+    n_steps = 100
+
+    imputations = {
+            # 'MICE impyute': impyute.mice,
+            # 'EM impyute': impyute.em,
+            'Iterative scilearn max=25 random=0': it_imputer_25_0.fit_transform,
+            'Iterative scilearn max=25 random=1': it_imputer_25_1.fit_transform,
+            # 'Iterative scilearn max=100 random=0': it_imputer_100_0.fit_transform,
+            # 'Iterative scilearn max=100 random=1': it_imputer_100_1.fit_transform,
+            # 'KNN scilearn k=2': knn_imputer_2.fit_transform,
+            # 'KNN scilearn k=4': knn_imputer_4.fit_transform,
+            # 'KNN scilearn k=6': knn_imputer_6.fit_transform,
+            # 'KNN scilearn k=8': knn_imputer_8.fit_transform,
+            # 'KNN scilearn k=10': knn_imputer_10.fit_transform,
+            # 'KNN scilearn k=12': knn_imputer_12.fit_transform,
+            # 'KNN scilearn k=14': knn_imputer_14.fit_transform
+        }
+
+    for i in range(start,start+(n_steps-1)*step+1,step):
         no_nan = get_non_nan(array, 0, i)
         if no_nan[2].shape[0]*no_nan[2].shape[1] == 0:
+            n_steps -= n_steps-(i/step-1)
             break
-        res = test_all_diff(no_nan[2], {'MICE impyute': impyute.mice, 'Iterative scilearn max=25 random=0': it_imputer.fit_transform, 'KNN scilearn': knn_imputer.fit_transform}, 2, [names[i] for i in no_nan[1]], no_nan[0],seed=random.randint(0,100))
-        final[f'{i} columns'] = res
-    
-    with open('result.json', 'w') as f:
-        f.write(json.dumps(final))
+        sample_size = no_nan[2].shape[0]*no_nan[2].shape[1]
+        res = test_all_diff(no_nan[2], imputations, 2, [names[i] for i in no_nan[1]], no_nan[0],seed=25)
+        final_all[f'{i} columns {sample_size}'] = res
+        final_rmse[f'{i} columns {sample_size}'] = {key: value['RMSE'] for key, value in res.items()}
+        for key, value in res.items():
+            if key in total_rmse:
+                total_rmse[key] += value['RMSE']
+            else:
+                total_rmse[key] = value['RMSE']
+            if key not in rmse_prog:
+                rmse_prog[key] = {}
+            rmse_prog[key][i] = value['RMSE']
+
+    final_rmse['Average RMSE'] = {}
+
+    for key, value in total_rmse.items():
+        final_rmse['Average RMSE'][key] = value/n_steps
+
+    with open('result_all.json', 'w') as f:
+        f.write(json.dumps(final_all, indent=4))
         f.close()
-        
+    with open('result_rmse.json', 'w') as f:
+        f.write(json.dumps(final_rmse, indent=4))
+        f.close()
+    with open('result_rmse_prog.json', 'w') as f:
+        f.write(json.dumps(rmse_prog, indent=4))
+        f.close()
+    
+    plot = 'Iterative scilearn max=25 random=0'
+    plt.title(plot)
+    plt.plot([x for x in rmse_prog[plot]],[y for _, y in rmse_prog[plot].items()])  
+
+    # fig, axs = plt.subplots(3, 4)
+    # for i, (key, value) in enumerate(rmse_prog.items()):
+    #     axs[(i//4), i-(i//4)*4].set_title(key)
+    #     axs[(i//4), i-(i//4)*4].plot([x for x in value], [value[x] for x in value])   
+    plt.show()
